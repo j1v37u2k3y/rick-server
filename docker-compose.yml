@@ -1,0 +1,22 @@
+# rick-server stack. Ollama runs NATIVELY on the host (owns the GPUs) — not in compose;
+# containers reach it via host.docker.internal. Copy .env.example -> .env before `make up`.
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: rick-open-webui
+    restart: unless-stopped
+    ports:
+      - "${OPENWEBUI_PORT:-3000}:8080"
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set WEBUI_SECRET_KEY in .env}
+      WEBUI_AUTH: "true"
+      RAG_EMBEDDING_ENGINE: ${RAG_EMBEDDING_ENGINE:-ollama}
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-nomic-embed-text}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - open-webui-data:/app/backend/data
+
+volumes:
+  open-webui-data:
