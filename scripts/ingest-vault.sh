@@ -26,7 +26,7 @@ AUTH=(-H "Authorization: Bearer ${OPENWEBUI_API_KEY}")
 [ -d "$VAULT" ] || { echo "No vault directory at $VAULT"; exit 1; }
 
 # Find an existing collection by name, else create one.
-kb_id="$(curl -fsS "${AUTH[@]}" "${OWUI}/api/v1/knowledge/list" 2>/dev/null \
+kb_id="$(curl -fsS "${AUTH[@]}" "${OWUI}/api/v1/knowledge/" 2>/dev/null \
   | jq -r --arg n "$KB_NAME" 'map(select(.name==$n)) | (.[0].id // empty)')"
 if [ -z "$kb_id" ]; then
   kb_id="$(curl -fsS "${AUTH[@]}" -H "Content-Type: application/json" -X POST \
