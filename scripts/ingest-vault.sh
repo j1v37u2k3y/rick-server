@@ -7,7 +7,7 @@
 #   OPENWEBUI_URL      Open WebUI base URL (default http://localhost:$OPENWEBUI_PORT)
 #   KB_NAME            Knowledge collection name (default "Vault")
 #
-# Re-run after a `git pull` in your ~/.rick_mcp clone to refresh (existing collection is reused).
+# Re-run after a `git pull` in your ~/.rick_mcp clone to refresh (the collection is rebuilt cleanly).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -25,23 +25,28 @@ AUTH=(-H "Authorization: Bearer ${OPENWEBUI_API_KEY}")
 
 [ -d "$VAULT" ] || { echo "No vault directory at $VAULT"; exit 1; }
 
-# Find an existing collection by name, else create one.
-kb_id="$(curl -fsS "${AUTH[@]}" "${OWUI}/api/v1/knowledge/" 2>/dev/null \
-  | jq -r --arg n "$KB_NAME" '(.items // .) | map(select(.name==$n)) | (.[0].id // empty)')"
-if [ -z "$kb_id" ]; then
-  kb_id="$(curl -fsS "${AUTH[@]}" -H "Content-Type: application/json" -X POST \
-    "${OWUI}/api/v1/knowledge/create" \
-    -d "$(jq -nc --arg n "$KB_NAME" '{name:$n, description:"Rick second brain — vault notes"}')" \
-    | jq -r '.id // empty')"
-  [ -n "$kb_id" ] && echo "Created Knowledge collection '$KB_NAME' ($kb_id)"
-else
-  echo "Reusing Knowledge collection '$KB_NAME' ($kb_id)"
+# Clean slate: delete any existing collection with this name, then create fresh
+# (so a re-run after `git pull` fully rebuilds instead of duplicating files).
+existing="$(curl -fsS "${AUTH[@]}" "${OWUI}/api/v1/knowledge/" 2>/dev/null \
+  | jq -r --arg n "$KB_NAME" '(.items // .) | map(select(.name==$n)) | (.[0].id // empty)' || true)"
+if [ -n "$existing" ]; then
+  curl -fsS "${AUTH[@]}" -X DELETE "${OWUI}/api/v1/knowledge/${existing}/delete" >/dev/null 2>&1 || true
+  echo "Removed existing '$KB_NAME' ($existing) for a clean re-ingest"
 fi
-[ -n "$kb_id" ] || { echo "Could not get/create the Knowledge collection — check OPENWEBUI_API_KEY and API access."; exit 1; }
+kb_id="$(curl -fsS "${AUTH[@]}" -H "Content-Type: application/json" -X POST "${OWUI}/api/v1/knowledge/create" \
+  -d "$(jq -nc --arg n "$KB_NAME" '{name:$n, description:"Rick second brain — vault notes"}')" \
+  | jq -r '.id // empty' || true)"
+[ -n "$kb_id" ] || { echo "Could not create the Knowledge collection — check OPENWEBUI_API_KEY and API access."; exit 1; }
+echo "Created Knowledge collection '$KB_NAME' ($kb_id)"
 
+# Upload each note and add it to the collection. Resilient: an unreadable/odd file is counted
+# and skipped, never aborts the batch. Quoting @"path" lets curl handle commas/spaces in names.
 ok=0; fail=0
 while IFS= read -r -d '' f; do
-  file_id="$(curl -fsS "${AUTH[@]}" -F "file=@${f}" "${OWUI}/api/v1/files/" 2>/dev/null | jq -r '.id // empty')"
+  file_id=""
+  if [ -r "$f" ]; then
+    file_id="$(curl -fsS "${AUTH[@]}" -F "file=@\"${f}\"" "${OWUI}/api/v1/files/" 2>/dev/null | jq -r '.id // empty' || true)"
+  fi
   if [ -n "$file_id" ] && curl -fsS "${AUTH[@]}" -H "Content-Type: application/json" -X POST \
       "${OWUI}/api/v1/knowledge/${kb_id}/file/add" \
       -d "$(jq -nc --arg id "$file_id" '{file_id:$id}')" >/dev/null 2>&1; then
